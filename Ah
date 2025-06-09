@@ -1,0 +1,108 @@
+`timescale 1ns/1ps
+module tb_axi_writer;
+
+  logic m_ACLK = 0, m_ARESETN = 0;
+  always #5 m_ACLK = ~m_ACLK;
+
+  logic [31:0] m_AWADDR, m_WDATA;
+  logic        m_AWVALID = 0, m_WVALID = 0;
+  logic [3:0]  m_WSTRB = 4'hF;
+  logic        m_BREADY = 0;
+  logic        s_AWREADY, s_WREADY, s_BVALID;
+
+  // TX buffer for address pipelining
+  logic [31:0] next_addr;
+  logic        addr_pending = 0;
+
+  initial begin
+    $dumpfile("wave.vcd");
+    $dumpvars(0, tb_axi_writer);
+    m_ARESETN = 0;
+    #20 m_ARESETN = 1;
+    wait(m_ARESETN);
+    #10 load_and_write_axi("registers.txt");
+    #200;
+    $finish;
+  end
+
+  axi_slave_model dut(
+    .s_ACLK(m_ACLK), .s_ARESETN(m_ARESETN),
+    .s_AWADDR(m_AWADDR), .s_AWVALID(m_AWVALID), .s_AWREADY(s_AWREADY),
+    .s_WDATA(m_WDATA), .s_WSTRB(m_WSTRB), .s_WVALID(m_WVALID), .s_WREADY(s_WREADY),
+    .s_BVALID(s_BVALID), .s_BREADY(m_BREADY)
+  );
+
+  always @(posedge m_ACLK or negedge m_ARESETN) begin
+    if (!m_ARESETN) addr_pending <= 0;
+    else if (addr_pending && s_AWREADY) addr_pending <= 0;
+  end
+
+  task automatic axi_issue_addr(input logic [31:0] addr);
+    begin
+      m_AWADDR  <= addr;
+      m_AWVALID <= 1;
+      wait(s_AWREADY);
+      @(posedge m_ACLK);
+      m_AWVALID <= 0;
+    end
+  endtask
+
+  task automatic axi_send_data(input logic [31:0] data);
+    begin
+      m_WDATA  <= data;
+      m_WVALID <= 1;
+      wait(s_WREADY);
+      @(posedge m_ACLK);
+      m_WVALID <= 0;
+    end
+  endtask
+
+  task automatic await_response();
+    begin
+      m_BREADY <= 1;
+      wait(s_BVALID);
+      @(posedge m_ACLK);
+      m_BREADY <= 0;
+    end
+  endtask
+
+  task automatic write_pair(input logic [31:0] addr, input logic [31:0] data);
+    begin
+      if (!addr_pending) begin
+        addr_pending = 1;
+        axi_issue_addr(addr);
+      end else begin
+        wait(!addr_pending);
+        addr_pending = 1;
+        axi_issue_addr(addr);
+      end
+
+      if (addr_pending == 0) begin
+        axi_send_data(data);
+        await_response();
+      end else begin
+        // Wait for outstanding addr to clear before sending data
+        wait(!addr_pending);
+        axi_send_data(data);
+        await_response();
+      end
+    end
+  endtask
+
+  task automatic load_and_write_axi(input string fname);
+    integer f; string line; logic [31:0] addr, data;
+    f = $fopen(fname, "r");
+    if (!f) begin $display("Cannot open %s", fname); $finish; end
+    while (!$feof(f)) begin
+      void'($fgets(line, f));
+      if (line.len() && line.substr(0,1)!="/") begin
+        if ($sscanf(line, "32'h%h 32'h%h", addr, data)==2) begin
+          write_pair(addr, data);
+          #1;
+        end
+      end
+    end
+    $fclose(f);
+  endtask
+
+endmodule
