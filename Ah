@@ -106,3 +106,43 @@ module tb_axi_writer;
   endtask
 
 endmodule
+
+
+
+
+
+
+module axi_slave_model (
+  input  logic        s_ACLK, s_ARESETN,
+  input  logic [31:0] s_AWADDR,
+  input  logic        s_AWVALID,
+  output logic        s_AWREADY,
+  input  logic [31:0] s_WDATA,
+  input  logic [3:0]  s_WSTRB,
+  input  logic        s_WVALID,
+  output logic        s_WREADY,
+  output logic        s_BVALID,
+  input  logic        s_BREADY
+);
+  always_ff @(posedge s_ACLK or negedge s_ARESETN) begin
+    if (!s_ARESETN) s_AWREADY <= 0;
+    else if (!s_AWREADY && s_AWVALID) s_AWREADY <= 1;
+    else if (s_AWREADY && s_AWVALID) s_AWREADY <= 0;
+  end
+
+  always_ff @(posedge s_ACLK or negedge s_ARESETN) begin
+    if (!s_ARESETN) s_WREADY <= 0;
+    else if (!s_WREADY && s_WVALID) s_WREADY <= 1;
+    else if (s_WREADY && s_WVALID) s_WREADY <= 0;
+  end
+
+  always_ff @(posedge s_ACLK or negedge s_ARESETN) begin
+    if (!s_ARESETN) s_BVALID <= 0;
+    else if (s_AWVALID && s_AWREADY && s_WVALID && s_WREADY) s_BVALID <= 1;
+    else if (s_BVALID && s_BREADY) s_BVALID <= 0;
+  end
+
+endmodule
+
+
+
